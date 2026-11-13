@@ -7,8 +7,10 @@ const { evaluate,cdp,setup,cleanup }=require('./live-helper.cjs');
     const points=evaluate(`
       const p=app.plugins.plugins['sparse-sort'],v=p.views()[0],folder=globalThis.__sparseSortFixture.folder;
       if(!p.editing)p.toggleEditing();
-      const from=v.fileItems[folder+'/B.md'].selfEl.querySelector('.ss-handle').getBoundingClientRect();
-      const to=v.fileItems[folder+'/A.md'].selfEl.getBoundingClientRect();
+      const current=v.getSortedFolderItems(app.vault.getAbstractFileByPath(folder)).map(item=>item.file.name);
+      const source=current.at(-1);globalThis.__sparseSortFixture.expected=[source,...current.filter(name=>name!==source)];
+      const from=v.fileItems[folder+'/'+source].selfEl.querySelector('.ss-handle').getBoundingClientRect();
+      const to=v.fileItems[folder+'/'+current[0]].selfEl.getBoundingClientRect();
       return {from:{x:from.left+from.width/2,y:from.top+from.height/2},to:{x:to.right-30,y:to.top+2}};
     `);
     cdp('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1});
@@ -18,7 +20,7 @@ const { evaluate,cdp,setup,cleanup }=require('./live-helper.cjs');
     console.log(JSON.stringify(evaluate(`
       const p=app.plugins.plugins['sparse-sort'],folder=globalThis.__sparseSortFixture.folder;await p.writer.flush();
       const disk=JSON.parse(await app.vault.adapter.read(p.manifest.dir+'/data.json'));
-      if(disk.orders[folder]?.[0]!=='B.md'||disk.orders[folder]?.[1]!=='A.md')throw Error('Touch was not saved');
+      if(JSON.stringify(disk.orders[folder])!==JSON.stringify(globalThis.__sparseSortFixture.expected))throw Error('Touch was not saved');
       return {touchSaved:true};
     `)));
   } finally {

@@ -30,10 +30,10 @@ function setup(touch = false) {
     let mounted=false;
     for(let i=0;i<40;i++){
       await new Promise(resolve=>setTimeout(resolve,50));
-      const a=v.fileItems[folder+'/A.md']?.selfEl,b=v.fileItems[folder+'/B.md']?.selfEl;
+      const rows=['A.md','B.md','C.md'].map(name=>v.fileItems[folder+'/'+name]?.selfEl);
       const container=v.navFileContainerEl.getBoundingClientRect();
-      if(a?.isConnected&&b?.isConnected&&a.getBoundingClientRect().top>=container.top&&b.getBoundingClientRect().bottom<=container.bottom){mounted=true;break;}
-      if(i%5===4)v.revealInFolder(app.vault.getAbstractFileByPath(folder+'/B.md'));
+      if(rows.every(row=>row?.isConnected&&row.getBoundingClientRect().top>=container.top&&row.getBoundingClientRect().bottom<=container.bottom)){mounted=true;break;}
+      if(i%5===4){const last=v.getSortedFolderItems(app.vault.getAbstractFileByPath(folder)).at(-1);if(last)v.revealInFolder(last.file);}
     }
     if(!mounted)throw Error('Fixture rows are not visible; open the file explorer and clear its search first.');
     return {folder};
@@ -50,6 +50,7 @@ function cleanup() {
     if(p.editing!==state.editing)p.toggleEditing();
     v.navFileContainerEl.scrollTop=state.scroll;
     if(state.active)app.workspace.setActiveLeaf(state.active);
+    document.querySelectorAll('.notice').forEach(el=>{if(el.textContent.includes(state.folder))el.remove();});
     delete globalThis.__sparseSortFixture;
     return {cleaned:true,testOrderRemoved:!p.store.data.orders[state.folder]};
   `);

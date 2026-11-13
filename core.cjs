@@ -8,6 +8,23 @@ const equal = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 const names = values => [...new Set((Array.isArray(values) ? values : []).filter(
   v => typeof v === 'string' && v && !v.includes('/') && v !== '.' && v !== '..'))];
 
+function insertNames(current, moving, anchor, after) {
+  const selected = new Set(moving);
+  const result = current.filter(name => !selected.has(name));
+  if (anchor != null && !result.includes(anchor)) throw Error('The insertion target changed. Try again.');
+  result.splice(anchor == null ? result.length : result.indexOf(anchor) + (after ? 1 : 0), 0, ...moving);
+  return result;
+}
+
+function restoreNames(current, original, moving) {
+  const selected = new Set(moving), result = current.filter(name => !selected.has(name));
+  for (let i = 0; i < original.length; i++) if (selected.has(original[i])) {
+    const next = original.slice(i + 1).find(name => result.includes(name));
+    result.splice(next == null ? result.length : result.indexOf(next), 0, original[i]);
+  }
+  return result;
+}
+
 function normalize(raw = {}) {
   if (raw.version != null && raw.version !== 1) throw new Error('Unsupported settings version');
   const orders = Object.create(null);
@@ -197,4 +214,4 @@ class SaveQueue {
   }
 }
 
-module.exports = { SortStore, SaveQueue, normalize, parentOf, nameOf, childPath, compileGlob };
+module.exports = { SortStore, SaveQueue, normalize, parentOf, nameOf, childPath, compileGlob, insertNames, restoreNames };

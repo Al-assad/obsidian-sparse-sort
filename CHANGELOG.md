@@ -1,8 +1,17 @@
 # Changelog
 
-## 0.1.0 — 2026-11-13
+## 0.2.0 — 2026-11-13
 
-Initial public release.
+First public release, including the initial prototype and cross-folder insertion.
+
+- Insert files and folders before/after a row in a different folder, including child-to-parent moves.
+- Promote the insertion level with a deliberate left drag at subtree boundaries, including an only child.
+- Show a destination path and a layer-aligned insertion line.
+- Require a 600 ms dwell for folder-center drops; offer Undo after moves.
+- Block name conflicts and self/descendant moves; roll back completed renames on failure.
+- Use Obsidian FileManager to follow native link-update settings.
+
+## 0.1.0 — 2026-11-13 (unreleased prototype)
 
 - Record manual order only for rearranged folders, with automatic saving after each effective drag.
 - Preserve native sorting for untouched folders and newly added items.

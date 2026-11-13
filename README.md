@@ -33,13 +33,22 @@ In [BRAT](https://github.com/TfTHacker/obsidian42-brat), add `Al-assad/obsidian-
 
 ### Desktop
 
-Drag a file or folder to the top or bottom edge of another row **in the same folder**. A blue insertion line marks the reorder target. Release to save automatically.
+Drag a file or folder to the top or bottom edge of another row. Within a folder this reorders; across folders this moves the item into the indicated parent at the chosen position. A blue insertion line and destination hint identify the target. Release to save automatically.
 
-The center of a folder row remains Obsidian's native **move into this folder** target. Cross-folder moves continue to use native behavior. A desktop selection can be reordered together when all selected items share a parent and pin state.
+The center of a folder row remains Obsidian's native **move into this folder** target. Folder-center drops during ordinary desktop dragging keep native behavior; handle dragging uses the guarded folder-center gesture described below. A desktop selection can be reordered together when all selected items share a parent and pin state.
 
 ### Mobile and touch
 
-Click the **Reorder items** button in the file explorer toolbar, or run **Sparse Sort: Toggle touch reorder handles**. Drag the handle on the right of a row, then release to save. Normal row areas remain available for scrolling. Touch handles reorder within a folder; use native actions to move files between folders.
+Click the **Reorder items** button in the file explorer toolbar, or run **Sparse Sort: Toggle move/reorder handles**. Drag the handle on the right of a row, then release to save. Normal row areas remain available for scrolling.
+
+Handles also support **cross-folder insertion at an exact position**:
+
+- Drop on a row's upper/lower edge to insert before/after it in that row's parent folder. This works inside an expanded destination folder, and for moving a child out into its parent between specific siblings.
+- At the first/last row of a subtree, drag left by about 28 pixels per level to promote the insertion to an ancestor. The blue line follows the destination indentation and the hint names the target folder and neighbor.
+- Hold over a folder's center for 600 ms to arm **Move into**. A quick pass does not move anything into that folder. Expand a destination before dragging if you want to choose one of its children as the insertion anchor.
+- Release to move and save. A **12-second Undo action** restores moved items and their previous positions when the original paths remain available.
+
+The destination path and Before/After hint are authoritative: check them before releasing. Moving folders moves their contents as well. Same-name conflicts (including case-only variants) and moves into a folder's own descendants are blocked. Moves use Obsidian's FileManager so internal links follow its normal update settings. Failed multi-item moves attempt to roll back completed renames; a partial rollback is reported instead of overwriting files.
 
 ### Reset, pin, and hide
 
@@ -74,7 +83,7 @@ For a manually ordered folder, sorting overlays its saved order onto the native 
 
 Changed settings are saved through a serialized queue with immutable snapshots and burst coalescing. Failed saves remain available in memory for **Retry saving order**. Entering the background also attempts a flush, although a process killed before a write finishes cannot guarantee persistence.
 
-Renames, moves, and deletions update affected saved paths and flags without walking all vault files. Cross-folder moves do not automatically opt the destination into manual ordering.
+Renames, moves, and deletions update affected saved paths and flags without walking all vault files. Native external moves leave untracked destinations on native sorting. A deliberate cross-folder insertion through Sparse Sort records the destination order to preserve the chosen position.
 
 ## Development
 
@@ -117,9 +126,10 @@ Optional live tests require the official Obsidian CLI and an open test vault:
 ```sh
 OBSIDIAN_TEST_VAULT="Test Vault" npm run test:desktop
 OBSIDIAN_TEST_VAULT="Test Vault" npm run test:touch
+OBSIDIAN_TEST_VAULT="Test Vault" npm run test:moves
 ```
 
-They create isolated temporary fixture files, verify automatic saving, and clean up those files and their saved order. The touch test uses Chromium touch emulation. Run live tests in a scratch vault.
+They create isolated temporary fixture files, verify automatic saving and cross-folder moves/undo, and clean up those files and their saved order. The touch and move tests use Chromium touch emulation. Run live tests in a scratch vault.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the release procedure.
 

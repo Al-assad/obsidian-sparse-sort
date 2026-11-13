@@ -1,6 +1,7 @@
 'use strict';
 const { Plugin, PluginSettingTab, Setting, Modal, Menu, Notice, TFolder, setIcon } = require('obsidian');
 const { SortStore, SaveQueue, parentOf, nameOf } = require('./core.cjs');
+const { MoveController } = require('./moves.cjs');
 
 class SparseSort extends Plugin {
   async onload() {
@@ -11,8 +12,16 @@ class SparseSort extends Plugin {
       new Notice('Could not save order. Changes remain in memory. Run the Retry saving order command.', 10000);
     });
     this.bindings = new Map(); this.patches = new Map(); this.editing = false; this.active = true;
+    this.moves = new MoveController({
+      getStore: () => this.store,
+      resolve: path => this.app.vault.getAbstractFileByPath(path),
+      sorted: (view, path) => this.sortedNames(view, path),
+      rename: (file, path) => this.app.fileManager.renameFile(file, path),
+      commit: () => { this.changed(); return this.writer.flush(); },
+      announce: (count, path, undo) => this.showMoveNotice(count, path, undo),
+    });
     this.addSettingTab(new SparseSettings(this.app, this));
-    this.addCommand({ id: 'toggle-reorder', name: 'Toggle touch reorder handles', callback: () => this.toggleEditing() });
+    this.addCommand({ id: 'toggle-reorder', name: 'Toggle move/reorder handles', callback: () => this.toggleEditing() });
     this.addCommand({ id: 'import-flexplorer', name: 'Import from Flexplorer and switch', callback: () => void this.openImport() });
     this.addCommand({ id: 'toggle-hidden', name: 'Toggle hidden items', callback: () => this.toggleHidden() });
     this.addCommand({ id: 'retry-save', name: 'Retry saving order', callback: () => void this.writer.flush().then(ok => {
@@ -72,28 +81,35 @@ class SparseSort extends Plugin {
     for (const view of this.views()) view.requestSort?.();
     for (const binding of this.bindings?.values() || []) binding.decorate(binding.el);
   }
-  changed() { void this.writer.enqueue(this.store.data); this.refresh(); }
+  changed() { if (this.moves?.busy) return; void this.writer.enqueue(this.store.data); this.refresh(); }
+  sortedNames(view, path) {
+    const folder = this.app.vault.getAbstractFileByPath(path);
+    const patch = this.patches.get(Object.getPrototypeOf(view));
+    if (!(folder instanceof TFolder) || !patch) throw Error('The file explorer is not ready.');
+    return this.store.apply(path, patch.original.call(view, folder), true).map(item => item.file.name);
+  }
+  showMoveNotice(count, path, undo) {
+    if (!this.active) return;
+    const content = document.createDocumentFragment();
+    content.createEl('span', { text: `Moved ${count} item(s) to ${path}. ` });
+    const button = content.createEl('button', { text: 'Undo' });
+    const notice = new Notice(content, 12000);
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await undo(); notice.hide(); new Notice('Move undone'); }
+      catch (error) { new Notice(error.message, 10000); button.disabled = false; }
+    });
+  }
   reset(path) { if (this.store.reset(path)) this.changed(); }
   toggleEditing() {
     if (!this.usable()) return;
     this.editing = !this.editing;
     for (const binding of this.bindings.values()) binding.updateMode();
-    new Notice(this.editing ? 'Drag the handles to reorder. Changes save automatically when you release.' : 'Touch reorder mode off');
+    new Notice(this.editing ? 'Drag handles to reorder or move. Check the destination hint before releasing.' : 'Touch reorder mode off');
   }
   toggleHidden() {
     if (!this.usable()) return;
     this.store.data.showHidden = !this.store.data.showHidden; this.changed();
-  }
-  reorder(view, paths, targetPath, after) {
-    if (this.conflicted() || !paths.length || paths.includes(targetPath)) return false;
-    const parent = parentOf(targetPath);
-    if (paths.some(path => parentOf(path) !== parent)) return false;
-    const folder = this.app.vault.getAbstractFileByPath(parent);
-    const patch = this.patches.get(Object.getPrototypeOf(view));
-    if (!(folder instanceof TFolder) || !patch) return false;
-    const current = this.store.apply(parent, patch.original.call(view, folder), true).map(item => item.file.name);
-    if (!this.store.reorder(parent, current, paths.map(nameOf), nameOf(targetPath), after)) return false;
-    this.changed(); return true;
   }
   fileMenu(menu, file) {
     if (!this.store || this.conflicted()) return;
@@ -147,7 +163,7 @@ class SparseSort extends Plugin {
   }
   async onExternalSettingsChange() {
     if (!this.writer) return;
-    if (this.writer.pending || this.writer.running) {
+    if (this.moves?.busy || this.writer.pending || this.writer.running) {
       new Notice('External settings changed while a local save is pending. Avoid reordering on two devices at once.', 10000); return;
     }
     try { this.store.replace(await this.loadData() || {}); this.refresh(); }
@@ -169,10 +185,14 @@ class ExplorerBinding {
     this.plugin = plugin; this.view = view; this.el = view.navFileContainerEl;
     this.doc = this.el.ownerDocument; this.win = this.doc.defaultView; this.cleanups = [];
     this.active = null; this.target = null; this.frame = 0; this.lastPoint = null;
+    this.hoverFolder = null; this.hoverTimer = 0;
+    this.hint = this.doc.body.createDiv({ cls: 'ss-drop-hint', attr: { 'aria-live': 'polite' } });
+    this.hint.hidden = true;
+    this.line = this.doc.body.createDiv({ cls: 'ss-drop-line' }); this.line.hidden = true;
     const header = view.containerEl.querySelector('.nav-buttons-container');
     if (header) {
       this.button = header.createEl('div', { cls: 'clickable-icon nav-action-button ss-toggle', attr: {
-        'aria-label': 'Reorder items (automatically saved)', role: 'button', tabindex: '0' } });
+        'aria-label': 'Reorder or move items (automatically saved)', role: 'button', tabindex: '0' } });
       setIcon(this.button, 'list-ordered');
       this.listen(this.button, 'click', () => plugin.toggleEditing());
       this.listen(this.button, 'contextmenu', event => {
@@ -255,23 +275,76 @@ class ExplorerBinding {
     const selected = [...(this.view.tree?.selectedDoms || [])].map(item => item.file?.path).filter(Boolean);
     const paths = selected.includes(file.path) ? selected : [file.path];
     this.active = { paths, parent: parentOf(file.path), touch: false,
-      mixed: paths.some(path => parentOf(path) !== parentOf(file.path)) };
+      startX: event.clientX, mixed: paths.some(path => parentOf(path) !== parentOf(file.path)) };
   }
   updateTarget(x, y) {
     this.clearTarget();
     if (!this.active) return;
+    this.lastPoint = { x, y };
     const hit = this.doc.elementFromPoint(x, y);
-    if (!hit || !this.el.contains(hit)) return;
+    if (!hit || !this.el.contains(hit)) { this.clearHover(); return; }
     const title = this.titleAt(hit);
-    const file = this.fileAt(title);
-    if (!file || parentOf(file.path) !== this.active.parent || this.active.paths.includes(file.path)) return;
-    // The middle of a folder remains an ordinary native move target on desktop.
+    let file = this.fileAt(title);
+    let levels = this.active.touch ? Math.floor(Math.max(0, this.active.startX - x) / 28) : 0;
+    if (!file || (this.active.paths.includes(file.path) && levels === 0)) { this.clearHover(); return; }
     const rect = title.getBoundingClientRect();
-    if (!this.active.touch && file instanceof TFolder && y > rect.top + rect.height * .25 && y < rect.bottom - rect.height * .25) return;
+    const center = file instanceof TFolder && y > rect.top + rect.height * .25 && y < rect.bottom - rect.height * .25;
+    // Ordinary desktop dragging keeps native folder-center moves. Handles use dwell.
+    if (center && !this.active.touch) { this.clearHover(); return; }
+    if (center) {
+      if (this.active.paths.some(path => file.path === path || file.path.startsWith(path + '/'))) { this.clearHover(); return; }
+      if (this.hoverFolder?.path !== file.path) {
+        this.clearHover(); this.hoverFolder = { path: file.path, since: Date.now() };
+        this.hoverTimer = this.win.setTimeout(() => {
+          this.hoverTimer = 0;
+          if (this.active && this.lastPoint) this.updateTarget(this.lastPoint.x, this.lastPoint.y);
+        }, 610);
+      }
+      const ready = Date.now() - this.hoverFolder.since >= 600;
+      title.classList.add(ready ? 'ss-folder-target' : 'ss-folder-pending');
+      this.markedTitle = title;
+      this.showHint(`${ready ? 'Move into' : 'Hold to move into'} ${file.path}`, rect);
+      if (ready) {
+        this.target = { kind: 'inside', path: file.path, parent: file.path, title };
+      }
+      return;
+    }
+    this.clearHover();
+    const after = y >= rect.top + rect.height / 2;
+    // At a subtree boundary, a deliberate left drag promotes the insertion level.
+    while (levels-- > 0 && file.parent && file.parent.path !== '/') {
+      const siblings = this.view.getSortedFolderItems(file.parent).map(item => item.file.path)
+        .filter(path => !this.active.paths.includes(path) || path === file.path);
+      if ((after ? siblings.at(-1) : siblings[0]) !== file.path) break;
+      file = file.parent;
+    }
+    const parent = parentOf(file.path);
+    if (this.active.paths.includes(file.path) || this.active.paths.some(path => parent === path || parent.startsWith(path + '/'))) return;
     const pinned = this.plugin.store.pinned.has(file.path);
     if (this.active.paths.some(path => this.plugin.store.pinned.has(path) !== pinned)) return;
-    this.target = { path: file.path, after: y >= rect.top + rect.height / 2, title };
-    title.dataset.ssDrop = this.target.after ? 'after' : 'before';
+    this.target = { kind: 'insert', path: file.path, parent, after, title };
+    const item = this.view.fileItems[file.path], anchorRect = item?.selfEl.getBoundingClientRect() ?? rect;
+    const bottom = file instanceof TFolder && !item?.collapsed ? item.el.getBoundingClientRect().bottom : anchorRect.bottom;
+    const container = this.el.getBoundingClientRect(), lineY = after ? bottom : anchorRect.top;
+    if (lineY >= container.top && lineY <= container.bottom) {
+      this.line.hidden = false;
+      this.line.style.left = `${anchorRect.left + 4}px`;
+      this.line.style.top = `${lineY - 1}px`;
+      this.line.style.width = `${Math.max(0, container.right - anchorRect.left - 12)}px`;
+    }
+    this.showHint(`${parent === '/' ? 'Vault root' : parent} · ${after ? 'After' : 'Before'} ${file.name}`, rect);
+  }
+  showHint(text, rect) {
+    if (this.hint.textContent !== text) this.hint.textContent = text;
+    this.hint.hidden = false;
+    const container = this.el.getBoundingClientRect();
+    this.hint.style.left = `${container.left + 8}px`;
+    this.hint.style.top = `${Math.max(container.top + 2, rect.top - 32)}px`;
+    this.hint.style.maxWidth = `${Math.max(100, container.width - 16)}px`;
+  }
+  clearHover() {
+    if (this.hoverTimer) this.win.clearTimeout(this.hoverTimer);
+    this.hoverTimer = 0; this.hoverFolder = null;
   }
   schedule(x, y) {
     this.lastPoint = { x, y };
@@ -300,7 +373,7 @@ class ExplorerBinding {
   }
   drop(event) {
     if (!this.active || this.active.touch) return;
-    this.updateTarget(event.clientX, event.clientY);
+    this.finalTarget(event);
     if (this.target) {
       event.preventDefault(); event.stopImmediatePropagation(); this.commit();
     }
@@ -311,7 +384,7 @@ class ExplorerBinding {
     const title = this.titleAt(event.target), file = this.fileAt(title);
     if (!file) return;
     event.preventDefault(); event.stopImmediatePropagation(); this.clear();
-    this.active = { paths: [file.path], parent: parentOf(file.path), touch: true, pointer: event.pointerId };
+    this.active = { paths: [file.path], parent: parentOf(file.path), touch: true, startX: event.clientX, pointer: event.pointerId };
     this.el.setPointerCapture(event.pointerId);
     this.el.classList.add('ss-dragging');
   }
@@ -322,23 +395,36 @@ class ExplorerBinding {
   pointerUp(event) {
     if (!this.active?.touch || this.active.pointer !== event.pointerId) return;
     event.preventDefault(); event.stopImmediatePropagation();
-    this.updateTarget(event.clientX, event.clientY); this.commit(); this.clear();
+    this.finalTarget(event); this.commit(); this.clear();
+  }
+  finalTarget(event) {
+    const point = this.lastPoint;
+    // Commit the visible preview if the pointer did not move. Virtualized rows can
+    // shift while a user holds still; recomputing then would change the destination.
+    if (this.frame || !point || Math.hypot(point.x - event.clientX, point.y - event.clientY) > 3) {
+      this.updateTarget(event.clientX, event.clientY);
+    }
   }
   commit() {
     if (!this.target || !this.active) return;
+    if (!this.plugin.usable()) return;
     if (this.active.mixed) { new Notice('Select items from the same folder to reorder them'); return; }
-    this.plugin.reorder(this.view, this.active.paths, this.target.path, this.target.after);
+    void this.plugin.moves.drop(this.view, this.active.paths.slice(), { ...this.target }).catch(error => new Notice(error.message, 10000));
   }
-  clearTarget() { if (this.target) delete this.target.title.dataset.ssDrop; this.target = null; }
+  clearTarget() {
+    if (this.target) { delete this.target.title.dataset.ssDrop; this.target.title.style.removeProperty('--ss-drop-indent'); }
+    this.markedTitle?.classList.remove('ss-folder-target', 'ss-folder-pending');
+    this.markedTitle = null; this.hint.hidden = true; this.line.hidden = true; this.target = null;
+  }
   clear() {
     if (this.frame) this.win.cancelAnimationFrame(this.frame);
-    this.frame = 0; this.clearTarget();
+    this.frame = 0; this.clearTarget(); this.clearHover(); this.lastPoint = null;
     const pointer = this.active?.pointer; this.active = null;
     if (pointer != null && this.el.hasPointerCapture(pointer)) this.el.releasePointerCapture(pointer);
     this.el.classList.remove('ss-dragging');
   }
   dispose() {
-    this.clear(); this.menu?.hide(); this.observer.disconnect(); this.cleanups.forEach(fn => fn()); this.button?.remove();
+    this.clear(); this.hint.remove(); this.line.remove(); this.menu?.hide(); this.observer.disconnect(); this.cleanups.forEach(fn => fn()); this.button?.remove();
     this.el.classList.remove('ss-editing'); this.el.querySelectorAll('.ss-handle, .ss-pin').forEach(el => el.remove());
   }
 }
@@ -384,7 +470,7 @@ class SparseSettings extends PluginSettingTab {
   display() {
     const el = this.containerEl, p = this.plugin; el.empty();
     el.createEl('h2', { text: 'Sparse Sort' });
-    el.createEl('p', { text: 'Drag within a folder to reorder and save automatically. Untouched folders keep native sorting. On mobile, enable touch handles. Use native actions to move files between folders.' });
+    el.createEl('p', { text: 'Drag between rows to reorder or move into an exact position. Handles support cross-folder insertion; hold over a folder center to move into it. Check the destination hint before releasing. Untouched folders keep native sorting.' });
     if (p.conflicted()) el.createEl('p', { cls: 'ss-conflict', text: 'Flexplorer is still enabled. Sparse Sort will wait until you import and switch.' });
     new Setting(el).setName('Import from Flexplorer').setDesc('Choose folders to keep, back up both configurations, then disable the old plugin.')
       .addButton(b => b.setButtonText('Preview import').onClick(() => void p.openImport()));

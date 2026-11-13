@@ -10,7 +10,7 @@ if (pkg.version !== manifest.version || versions[manifest.version] !== manifest.
 }
 if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) throw Error('Obsidian release versions must use x.y.z');
 if (process.env.RELEASE_TAG && process.env.RELEASE_TAG !== manifest.version) throw Error('Release tag must match manifest.version without a v prefix');
-for (const name of ['core.cjs', 'plugin.cjs', 'build.cjs']) {
+for (const name of ['core.cjs', 'moves.cjs', 'plugin.cjs', 'build.cjs']) {
   new vm.Script(fs.readFileSync(path.join(root, name), 'utf8'), { filename: name });
 }
 console.log(`Validated Sparse Sort ${manifest.version}`);
