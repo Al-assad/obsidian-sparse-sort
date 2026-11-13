@@ -1,0 +1,21 @@
+{
+  "name": "obsidian-sparse-sort",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lightweight manual folder ordering for Obsidian, with automatic saving and native fallback.",
+  "license": "MIT",
+  "author": "Assad",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Al-assad/obsidian-sparse-sort.git"
+  },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "check": "node scripts/check.cjs",
+    "build": "node build.cjs",
+    "install:local": "node build.cjs --install",
+    "test:desktop": "node test/desktop-smoke.cjs",
+    "test:touch": "node test/touch-smoke.cjs"
+  }
+}

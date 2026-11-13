@@ -1,0 +1,18 @@
+.ss-handle { display: none; position: absolute; inset-inline-end: 0; inset-block: 0; width: 32px; align-items: center; justify-content: center; color: var(--text-muted); cursor: grab; touch-action: none; box-sizing: border-box; }
+.ss-handle svg { width: 16px; height: 16px; pointer-events: none; }
+.ss-pin { display: inline-flex; margin-inline-start: auto; opacity: .5; padding-inline: 4px; }
+.ss-pin svg { width: 14px; height: 14px; }
+.ss-editing .ss-handle { display: inline-flex; }
+.ss-editing .nav-file-title, .ss-editing .nav-folder-title { position: relative; padding-inline-end: 36px; }
+.ss-dragging { user-select: none; -webkit-user-select: none; }
+.ss-dragging .ss-handle { cursor: grabbing; }
+[data-ss-drop] { position: relative; }
+[data-ss-drop]::after { content: ''; position: absolute; inset-inline: 4px; height: 2px; background: var(--interactive-accent); z-index: 5; pointer-events: none; }
+[data-ss-drop='before']::after { top: -1px; }
+[data-ss-drop='after']::after { bottom: -1px; }
+.ss-toggle.is-active { color: var(--interactive-accent); background: var(--background-modifier-hover); }
+.ss-import-filter { width: 100%; }
+.ss-import-list { max-height: 45vh; overflow-y: auto; margin-block: 8px; }
+.ss-import-list .setting-item-name { overflow-wrap: anywhere; }
+.ss-conflict { color: var(--text-warning); }
+.is-mobile .ss-handle { width: 36px; }

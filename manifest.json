@@ -1,0 +1,10 @@
+{
+  "id": "sparse-sort",
+  "name": "Sparse Sort",
+  "version": "0.1.0",
+  "minAppVersion": "1.13.0",
+  "description": "Manually reorder selected folders with automatic saving, while untouched folders keep native sorting.",
+  "author": "Assad",
+  "authorUrl": "https://github.com/Al-assad",
+  "isDesktopOnly": false
+}

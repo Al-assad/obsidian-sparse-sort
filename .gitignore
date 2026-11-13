@@ -1,0 +1,11 @@
+node_modules/
+dist/
+main.js
+*.zip
+.local.json
+data.json
+backups/
+.DS_Store
+*.log
+coverage/
+ss-smoke-*/
